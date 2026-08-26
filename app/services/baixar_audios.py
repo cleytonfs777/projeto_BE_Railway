@@ -4,6 +4,7 @@ import subprocess
 import zipfile
 from datetime import datetime
 from time import sleep
+from urllib.parse import urljoin
 
 from dotenv import load_dotenv
 from selenium import webdriver
@@ -226,20 +227,170 @@ def _pasta_dia_por_data(data_hora_texto):
     return "sem_data"
 
 
+TAMANHO_MINIMO_3GP_BYTES = 2048
+
+
+def _arquivo_parece_3gp_cabecalho(caminho):
+    """Checagem rápida: tamanho mínimo + assinatura ftyp (não é HTML)."""
+    try:
+        tamanho = os.path.getsize(caminho)
+    except OSError:
+        return False, "arquivo inexistente"
+
+    if tamanho < TAMANHO_MINIMO_3GP_BYTES:
+        return False, f"arquivo muito pequeno ({tamanho} bytes)"
+
+    with open(caminho, "rb") as f:
+        cabecalho = f.read(64)
+
+    if not cabecalho:
+        return False, "arquivo vazio"
+
+    inicio = cabecalho.lstrip().lower()
+    if inicio.startswith((b"<!doctype", b"<html", b"<?xml", b"{", b"[")):
+        return False, "resposta HTML/JSON em vez de áudio"
+
+    if b"ftyp" not in cabecalho:
+        return False, "sem assinatura ftyp (download incompleto/corrompido)"
+
+    return True, "ok"
+
+
+def _arquivo_parece_3gp_valido(caminho):
+    """
+    Valida o 3gp de forma mais estrita (ffprobe). Sem moov, o ffmpeg falha
+    com 'moov atom not found'.
+    """
+    ok, detalhe = _arquivo_parece_3gp_cabecalho(caminho)
+    if not ok:
+        return False, detalhe
+
+    try:
+        probe = subprocess.run(
+            [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                caminho,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+        )
+        if probe.returncode != 0:
+            err = (probe.stderr or b"").decode(errors="ignore").strip()
+            return False, _resumir_erro_ffmpeg(err) or "ffprobe rejeitou o arquivo"
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        return False, f"ffprobe falhou: {e}"
+
+    return True, "ok"
+
+
+def _resumir_erro_ffmpeg(stderr_texto, max_len=280):
+    """Extrai a linha útil do stderr do ffmpeg (sem o banner longo)."""
+    linhas = [
+        ln.strip()
+        for ln in (stderr_texto or "").splitlines()
+        if ln.strip()
+        and not ln.startswith("ffmpeg version")
+        and not ln.startswith("built with")
+        and not ln.startswith("configuration:")
+        and not ln.startswith("libav")
+        and not ln.startswith("libsw")
+        and not ln.startswith("libpost")
+    ]
+    if not linhas:
+        return (stderr_texto or "erro desconhecido")[:max_len]
+    for ln in reversed(linhas):
+        low = ln.lower()
+        if "error" in low or "invalid" in low or "not found" in low or "failed" in low:
+            return ln[:max_len]
+    return " | ".join(linhas[-3:])[:max_len]
+
+
+def _baixar_arquivo_com_retry(sessao, href, destino, tentativas=3):
+    """Baixa e valida o 3gp; em falha, remove e tenta de novo."""
+    ultimo_erro = "falha desconhecida"
+    for tentativa in range(1, tentativas + 1):
+        try:
+            if os.path.exists(destino):
+                os.remove(destino)
+
+            r = sessao.get(href, stream=True, timeout=120)
+            r.raise_for_status()
+
+            content_type = (r.headers.get("Content-Type") or "").lower()
+            if "text/html" in content_type or "application/json" in content_type:
+                ultimo_erro = f"Content-Type inesperado: {content_type}"
+                r.close()
+                sleep(0.8 * tentativa)
+                continue
+
+            esperado = r.headers.get("Content-Length")
+            escrito = 0
+            with open(destino, "wb") as f:
+                for chunk in r.iter_content(8192):
+                    if chunk:
+                        f.write(chunk)
+                        escrito += len(chunk)
+
+            if esperado is not None:
+                try:
+                    if escrito != int(esperado):
+                        ultimo_erro = (
+                            f"tamanho incompleto ({escrito}/{esperado} bytes)"
+                        )
+                        if os.path.exists(destino):
+                            os.remove(destino)
+                        sleep(0.8 * tentativa)
+                        continue
+                except ValueError:
+                    pass
+
+            ok, detalhe = _arquivo_parece_3gp_cabecalho(destino)
+            if ok:
+                return True, "ok"
+
+            ultimo_erro = detalhe
+            if os.path.exists(destino):
+                os.remove(destino)
+            sleep(0.8 * tentativa)
+        except Exception as e:
+            ultimo_erro = str(e)
+            if os.path.exists(destino):
+                try:
+                    os.remove(destino)
+                except OSError:
+                    pass
+            sleep(0.8 * tentativa)
+
+    return False, ultimo_erro
+
+
 def _baixar_com_sessao(navegador, dados):
     """
     Baixa cada arquivo em uma subpasta de DADOS_DIR nomeada pelo dia da
     gravação (formato dia_mes), renomeando o arquivo pela data/hora.
+    Valida o conteúdo (evita .3gp corrompidos que quebram o ffmpeg).
     """
     sessao = requests.Session()
     for c in navegador.get_cookies():
         sessao.cookies.set(c["name"], c["value"])
     sessao.headers.update(
-        {"User-Agent": navegador.execute_script("return navigator.userAgent")}
+        {
+            "User-Agent": navegador.execute_script("return navigator.userAgent"),
+            "Referer": navegador.current_url,
+        }
     )
+
+    base_url = navegador.current_url
+    falhas_download = 0
 
     for i, item in enumerate(dados, 1):
         href = item["href"]
+        href_abs = urljoin(base_url, href)
         data_hora_texto = item.get("data_hora")
         nome_arquivo = _nome_arquivo_por_data(href, data_hora_texto)
 
@@ -254,22 +405,27 @@ def _baixar_com_sessao(navegador, dados):
             destino = os.path.join(pasta_dia, f"{raiz}_{contador}{extensao}")
             contador += 1
 
-        yield f"Baixando {i}/{len(dados)}: {os.path.relpath(destino, DADOS_DIR)}"
-        r = sessao.get(href, stream=True, timeout=120)
-        r.raise_for_status()
-        with open(destino, "wb") as f:
-            for chunk in r.iter_content(8192):
-                f.write(chunk)
+        relativo = os.path.relpath(destino, DADOS_DIR)
+        yield f"Baixando {i}/{len(dados)}: {relativo}"
+        ok, detalhe = _baixar_arquivo_com_retry(sessao, href_abs, destino)
+        if not ok:
+            falhas_download += 1
+            yield f"  ❌ Download inválido ({detalhe}): {relativo}"
 
-    yield "Downloads concluídos!"
+    if falhas_download:
+        yield (
+            f"Downloads concluídos com {falhas_download} falha(s) "
+            "(arquivos inválidos foram descartados)."
+        )
+    else:
+        yield "Downloads concluídos!"
 
 
 def _converter_3gp_para_mp3():
     """
-    Converte, via ffmpeg, todos os .3gp de DADOS_DIR (incluindo subpastas
-    por dia) para .mp3, aplicando filtros para reduzir ruído de ambientes
-    barulhentos mantendo a voz clara. Após uma conversão bem-sucedida, o
-    .3gp original é removido.
+    Converte, via ffmpeg, todos os .3gp de DADOS_DIR para .mp3.
+    Se a conversão falhar (ou o arquivo for inválido para o ffmpeg), o .3gp
+    original é mantido para entrar no zip. Só remove o .3gp após sucesso.
     """
     arquivos_3gp = []
     for raiz, _, arquivos in os.walk(DADOS_DIR):
@@ -293,14 +449,27 @@ def _converter_3gp_para_mp3():
         "alimiter=limit=0.95"
     )
 
+    convertidos = 0
+    mantidos_3gp = 0
+
     for i, origem in enumerate(arquivos_3gp, 1):
         destino = os.path.splitext(origem)[0] + ".mp3"
         nome = os.path.relpath(origem, DADOS_DIR)
+
+        ok_arquivo, detalhe = _arquivo_parece_3gp_valido(origem)
+        if not ok_arquivo:
+            mantidos_3gp += 1
+            yield (
+                f"  ⚠️ Não converteu {nome} ({detalhe}) — "
+                "mantido como .3gp para o zip"
+            )
+            continue
 
         yield f"Convertendo {i}/{len(arquivos_3gp)}: {nome}"
         resultado = subprocess.run(
             [
                 "ffmpeg", "-y",
+                "-hide_banner", "-loglevel", "error",
                 "-i", origem,
                 "-af", filtro_audio,
                 "-ar", "44100",
@@ -313,14 +482,26 @@ def _converter_3gp_para_mp3():
         )
 
         if resultado.returncode != 0:
-            erro = resultado.stderr.decode(errors="ignore")
-            yield f"  ❌ Falha ao converter {nome}: {erro}"
+            mantidos_3gp += 1
+            erro = _resumir_erro_ffmpeg(resultado.stderr.decode(errors="ignore"))
+            yield (
+                f"  ⚠️ Falha ao converter {nome}: {erro} — "
+                "mantido como .3gp para o zip"
+            )
+            if os.path.exists(destino):
+                try:
+                    os.remove(destino)
+                except OSError:
+                    pass
             continue
 
         os.remove(origem)
+        convertidos += 1
 
-    yield "Conversão concluída!"
-
+    yield (
+        f"Conversão concluída! {convertidos} mp3, "
+        f"{mantidos_3gp} mantido(s) em .3gp."
+    )
 
 def _zipar_audios():
     """
