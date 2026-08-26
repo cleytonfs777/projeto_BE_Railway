@@ -1,0 +1,55 @@
+# Ambiente e segredos
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+secrets/
+
+# Python
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Banco e dados locais
+app.db
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Downloads e artefatos gerados (nunca versionar)
+downloads/
+**/downloads/
+*.zip
+
+# Cópias locais / backup (contêm .env e dados)
+NOVOSISTEMA/
+backup_sistem/
+
+# SO / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs e temporários
+*.log
+tmp/
+temp/
+.cache/
+
+# Chrome / Selenium locais
+chromedriver*

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baixar Áudios — BE</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --border: #334155;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --success-hover: #16a34a;
+            --error: #ef4444;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .nav-links a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 0.5rem 0.875rem;
+            border-radius: 8px;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .nav-links a:hover {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .nav-links a.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .nav-user {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.8125rem;
+            color: var(--muted);
+        }
+
+        .nav-user .logout-link {
+            color: var(--error);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .nav-user .logout-link:hover {
+            text-decoration: underline;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .card p {
+            color: var(--muted);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
+        }
+
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #zip-links {
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        #zip-links a {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: var(--success);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            transition: background 0.15s;
+        }
+
+        #zip-links a:hover {
+            background: var(--success-hover);
+        }
+
+        #zip-links a .tamanho {
+            font-weight: 400;
+            font-size: 0.8125rem;
+            opacity: 0.85;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .log-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .status {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.625rem;
+            border-radius: 999px;
+            background: var(--border);
+            color: var(--muted);
+        }
+
+        .status.running {
+            background: #1d4ed833;
+            color: #60a5fa;
+        }
+
+        .status.done {
+            background: #16653433;
+            color: var(--success);
+        }
+
+        .status.error {
+            background: #7f1d1d33;
+            color: var(--error);
+        }
+
+        #log {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            height: 360px;
+            overflow-y: auto;
+            font-family: "Cascadia Code", "Fira Code", monospace;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            padding: 0.125rem 0;
+            border-bottom: 1px solid #1e293b44;
+        }
+
+        .log-line.error {
+            color: var(--error);
+        }
+
+        .log-line:last-child {
+            border-bottom: none;
+        }
+
+        .timestamp {
+            color: var(--muted);
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <div class="nav-links">
+                <a href="/">Gerar Gravação</a>
+                <a href="/baixar-audios" class="active">Baixar Áudios</a>
+            </div>
+            <div class="nav-user">
+                <span>{{ usuario }}</span>
+                <a href="/logout" class="logout-link">Sair</a>
+            </div>
+        </div>
+
+        <h1>Baixar Áudios</h1>
+        <p class="subtitle">Coleta todas as gravações disponíveis, converte para mp3 e disponibiliza um zip para download.</p>
+
+        <div class="card">
+            <p>Isso acessa o sistema BE, percorre todas as páginas de gravações, baixa os áudios, converte de 3gp para mp3 e organiza tudo em arquivos zip de até 50 MB cada, para facilitar o download. Pode levar alguns minutos.</p>
+            <button type="button" id="btn-iniciar">Iniciar Download</button>
+            <div id="zip-links"></div>
+        </div>
+
+        <div class="card">
+            <div class="log-header">
+                <h2>Log de execução</h2>
+                <span id="status" class="status">Aguardando</span>
+            </div>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const btnIniciar = document.getElementById("btn-iniciar");
+        const zipLinksEl = document.getElementById("zip-links");
+        const logEl = document.getElementById("log");
+        const statusEl = document.getElementById("status");
+
+        function setStatus(text, cls) {
+            statusEl.textContent = text;
+            statusEl.className = "status" + (cls ? " " + cls : "");
+        }
+
+        async function carregarLinksZip() {
+            try {
+                const response = await fetch("/api/baixar-audios/arquivos");
+                if (!response.ok) return;
+
+                const arquivos = await response.json();
+                zipLinksEl.innerHTML = "";
+
+                if (!arquivos.length) {
+                    zipLinksEl.style.display = "none";
+                    return;
+                }
+
+                arquivos.forEach((arquivo, indice) => {
+                    const link = document.createElement("a");
+                    link.href = `/api/baixar-audios/arquivo/${encodeURIComponent(arquivo.nome)}`;
+                    link.innerHTML = `<span>Parte ${indice + 1} — ${arquivo.nome}</span><span class="tamanho">${arquivo.tamanho_mb} MB</span>`;
+                    zipLinksEl.appendChild(link);
+                });
+
+                zipLinksEl.style.display = "flex";
+            } catch {
+                // silencioso: apenas não exibe os links
+            }
+        }
+
+        function appendLog(message, isError = false) {
+            const line = document.createElement("div");
+            line.className = "log-line" + (isError ? " error" : "");
+
+            const now = new Date().toLocaleTimeString("pt-BR");
+            line.innerHTML = `<span class="timestamp">[${now}]</span>${message}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        btnIniciar.addEventListener("click", async () => {
+            logEl.innerHTML = "";
+            zipLinksEl.style.display = "none";
+            zipLinksEl.innerHTML = "";
+            btnIniciar.disabled = true;
+            setStatus("Executando...", "running");
+
+            let houveErro = false;
+
+            try {
+                const response = await fetch("/api/baixar-audios");
+                if (!response.ok) {
+                    throw new Error(`Erro HTTP ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop();
+
+                    for (const part of parts) {
+                        const line = part.trim();
+                        if (!line.startsWith("data: ")) continue;
+
+                        const data = line.slice(6);
+                        if (data === "[DONE]") continue;
+
+                        try {
+                            const parsed = JSON.parse(data);
+                            const isError = parsed.message.startsWith("❌");
+                            appendLog(parsed.message, isError);
+                            if (isError) houveErro = true;
+                        } catch {
+                            appendLog(data);
+                        }
+                    }
+                }
+
+                if (houveErro) {
+                    setStatus("Erro", "error");
+                } else {
+                    setStatus("Concluído", "done");
+                    await carregarLinksZip();
+                }
+            } catch (err) {
+                appendLog(`❌ ERRO: ${err.message}`, true);
+                setStatus("Erro", "error");
+            } finally {
+                btnIniciar.disabled = false;
+            }
+        });
+
+        carregarLinksZip();
+    </script>
+</body>
+</html>

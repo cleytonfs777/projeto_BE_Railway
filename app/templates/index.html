@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro de Gravação BE</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --surface: #1e293b;
+            --border: #334155;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --success: #22c55e;
+            --error: #ef4444;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+        }
+
+        .container {
+            max-width: 720px;
+            margin: 0 auto;
+        }
+
+        .nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .nav-links a {
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.875rem;
+            font-weight: 500;
+            padding: 0.5rem 0.875rem;
+            border-radius: 8px;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .nav-links a:hover {
+            background: var(--surface);
+            color: var(--text);
+        }
+
+        .nav-links a.active {
+            background: var(--accent);
+            color: white;
+        }
+
+        .nav-user {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.8125rem;
+            color: var(--muted);
+        }
+
+        .nav-user .logout-link {
+            color: var(--error);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .nav-user .logout-link:hover {
+            text-decoration: underline;
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .subtitle {
+            color: var(--muted);
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .form-grid {
+            display: grid;
+            gap: 1rem;
+        }
+
+        label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.375rem;
+        }
+
+        .hint {
+            font-size: 0.75rem;
+            color: var(--muted);
+            margin-top: 0.25rem;
+        }
+
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 0.625rem 0.75rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text);
+            font-size: 0.9375rem;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        button {
+            margin-top: 0.5rem;
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        button:hover:not(:disabled) {
+            background: var(--accent-hover);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .log-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .log-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .status {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.625rem;
+            border-radius: 999px;
+            background: var(--border);
+            color: var(--muted);
+        }
+
+        .status.running {
+            background: #1d4ed833;
+            color: #60a5fa;
+        }
+
+        .status.done {
+            background: #16653433;
+            color: var(--success);
+        }
+
+        .status.error {
+            background: #7f1d1d33;
+            color: var(--error);
+        }
+
+        #log {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem;
+            height: 360px;
+            overflow-y: auto;
+            font-family: "Cascadia Code", "Fira Code", monospace;
+            font-size: 0.8125rem;
+            line-height: 1.6;
+        }
+
+        .log-line {
+            padding: 0.125rem 0;
+            border-bottom: 1px solid #1e293b44;
+        }
+
+        .log-line.error {
+            color: var(--error);
+        }
+
+        .log-line:last-child {
+            border-bottom: none;
+        }
+
+        .timestamp {
+            color: var(--muted);
+            margin-right: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav">
+            <div class="nav-links">
+                <a href="/" class="active">Gerar Gravação</a>
+                <a href="/baixar-audios">Baixar Áudios</a>
+            </div>
+            <div class="nav-user">
+                <span>{{ usuario }}</span>
+                <a href="/logout" class="logout-link">Sair</a>
+            </div>
+        </div>
+
+        <h1>Registro de Gravação BE</h1>
+        <p class="subtitle">Configure o período e inicie a automação com acompanhamento em tempo real.</p>
+
+        <div class="card">
+            <form id="form-gerar" class="form-grid">
+                <div>
+                    <label for="data_hora_inicial">Data/Hora Inicial</label>
+                    <input
+                        type="text"
+                        id="data_hora_inicial"
+                        name="data_hora_inicial"
+                        placeholder="09/07/2026 11:15"
+                        required
+                    >
+                    <p class="hint">Formato: {{ formato_data_hora }}</p>
+                </div>
+
+                <div>
+                    <label for="data_hora_final">Data/Hora Final</label>
+                    <input
+                        type="text"
+                        id="data_hora_final"
+                        name="data_hora_final"
+                        placeholder="09/07/2026 12:00"
+                        required
+                    >
+                    <p class="hint">Formato: {{ formato_data_hora }}</p>
+                </div>
+
+                <div>
+                    <label for="duracao_segundos">Duração (segundos)</label>
+                    <input
+                        type="number"
+                        id="duracao_segundos"
+                        name="duracao_segundos"
+                        value="600"
+                        min="1"
+                        required
+                    >
+                </div>
+
+                <button type="submit" id="btn-gerar">Gerar</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <div class="log-header">
+                <h2>Log de execução</h2>
+                <span id="status" class="status">Aguardando</span>
+            </div>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById("form-gerar");
+        const btnGerar = document.getElementById("btn-gerar");
+        const logEl = document.getElementById("log");
+        const statusEl = document.getElementById("status");
+
+        function formatarDataHora(date) {
+            const pad = (n) => String(n).padStart(2, "0");
+            const dia = pad(date.getDate());
+            const mes = pad(date.getMonth() + 1);
+            const ano = date.getFullYear();
+            const horas = pad(date.getHours());
+            const minutos = pad(date.getMinutes());
+            return `${dia}/${mes}/${ano} ${horas}:${minutos}`;
+        }
+
+        function preencherDatasPadrao() {
+            const agora = new Date();
+            const inicial = new Date(agora.getTime() + 3 * 60 * 1000);
+            const final = new Date(inicial.getTime() + (60 + 30) * 60 * 1000);
+
+            document.getElementById("data_hora_inicial").value = formatarDataHora(inicial);
+            document.getElementById("data_hora_final").value = formatarDataHora(final);
+        }
+
+        preencherDatasPadrao();
+
+        function setStatus(text, cls) {
+            statusEl.textContent = text;
+            statusEl.className = "status" + (cls ? " " + cls : "");
+        }
+
+        function appendLog(message, isError = false) {
+            const line = document.createElement("div");
+            line.className = "log-line" + (isError ? " error" : "");
+
+            const now = new Date().toLocaleTimeString("pt-BR");
+            line.innerHTML = `<span class="timestamp">[${now}]</span>${message}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+
+            const data_hora_inicial = document.getElementById("data_hora_inicial").value.trim();
+            const data_hora_final = document.getElementById("data_hora_final").value.trim();
+            const duracao_segundos = document.getElementById("duracao_segundos").value;
+
+            logEl.innerHTML = "";
+            btnGerar.disabled = true;
+            setStatus("Executando...", "running");
+
+            const params = new URLSearchParams({
+                data_hora_inicial,
+                data_hora_final,
+                duracao_segundos,
+            });
+
+            try {
+                const response = await fetch(`/api/gerar?${params}`);
+                if (!response.ok) {
+                    throw new Error(`Erro HTTP ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const parts = buffer.split("\n\n");
+                    buffer = parts.pop();
+
+                    for (const part of parts) {
+                        const line = part.trim();
+                        if (!line.startsWith("data: ")) continue;
+
+                        const data = line.slice(6);
+                        if (data === "[DONE]") {
+                            setStatus("Concluído", "done");
+                            continue;
+                        }
+
+                        try {
+                            const parsed = JSON.parse(data);
+                            const isError = parsed.message.startsWith("❌");
+                            appendLog(parsed.message, isError);
+                            if (isError) setStatus("Erro", "error");
+                        } catch {
+                            appendLog(data);
+                        }
+                    }
+                }
+
+                if (statusEl.textContent === "Executando...") {
+                    setStatus("Concluído", "done");
+                }
+            } catch (err) {
+                appendLog(`❌ ERRO: ${err.message}`, true);
+                setStatus("Erro", "error");
+            } finally {
+                btnGerar.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>

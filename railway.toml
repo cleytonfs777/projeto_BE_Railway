@@ -1,0 +1,11 @@
+# Railway: usa o Dockerfile do repositório
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+healthcheckPath = "/login"
+healthcheckTimeout = 30
+# Chrome + Selenium precisam de memória; plano mínimo costuma ser apertado
