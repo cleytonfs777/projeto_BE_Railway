@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+import threading
 import zipfile
 from datetime import datetime
 from time import sleep
@@ -22,7 +23,13 @@ FORMATO_DATA_HORA_REGISTRO = "%d/%m/%Y %H:%M:%S"
 DOWNLOADS_ROOT = os.path.abspath("downloads")
 DADOS_DIR = os.path.join(DOWNLOADS_ROOT, "dados")
 PREFIXO_ZIP = "audios_parte"
-TAMANHO_MAXIMO_ZIP_BYTES = 50 * 1024 * 1024
+TAMANHO_MAXIMO_ZIP_BYTES = 100 * 1024 * 1024
+
+# Job em background: sobrevive a queda de rede do navegador
+_job_lock = threading.Lock()
+_job_status = "idle"  # idle | running | done | error
+_job_log = []
+_job_thread = None
 
 
 def _criar_navegador():
@@ -421,11 +428,11 @@ def _baixar_com_sessao(navegador, dados):
         yield "Downloads concluídos!"
 
 
-def _converter_3gp_para_mp3():
+def _converter_e_empacotar_progressivo():
     """
-    Converte, via ffmpeg, todos os .3gp de DADOS_DIR para .mp3.
-    Se a conversão falhar (ou o arquivo for inválido para o ffmpeg), o .3gp
-    original é mantido para entrar no zip. Só remove o .3gp após sucesso.
+    Converte cada .3gp para .mp3 e, conforme os arquivos ficam prontos,
+    empacota em zips de até ~100 MB. Cada pacote fechado já fica disponível
+    para download enquanto o restante continua convertendo.
     """
     arquivos_3gp = []
     for raiz, _, arquivos in os.walk(DADOS_DIR):
@@ -438,7 +445,10 @@ def _converter_3gp_para_mp3():
         yield "Nenhum arquivo .3gp encontrado para converter."
         return
 
-    yield f"Convertendo {len(arquivos_3gp)} arquivo(s) .3gp para .mp3..."
+    yield (
+        f"Convertendo {len(arquivos_3gp)} arquivo(s) e empacotando "
+        f"em partes de até {TAMANHO_MAXIMO_ZIP_BYTES // (1024 * 1024)} MB..."
+    )
 
     filtro_audio = (
         "highpass=f=100,"
@@ -449,120 +459,222 @@ def _converter_3gp_para_mp3():
         "alimiter=limit=0.95"
     )
 
+    empacotador = _EmpacotadorProgressivo()
     convertidos = 0
     mantidos_3gp = 0
+    pacotes = 0
+
+    def _empacotar_e_avisar(caminho_pronto):
+        nonlocal pacotes
+        fechado = empacotador.adicionar(caminho_pronto)
+        if fechado:
+            nome, mb = fechado
+            pacotes += 1
+            yield (
+                f"📦 Pacote pronto: {nome} ({mb:.1f} MB) — "
+                "já disponível para download"
+            )
 
     for i, origem in enumerate(arquivos_3gp, 1):
-        destino = os.path.splitext(origem)[0] + ".mp3"
+        destino_mp3 = os.path.splitext(origem)[0] + ".mp3"
         nome = os.path.relpath(origem, DADOS_DIR)
 
-        ok_arquivo, detalhe = _arquivo_parece_3gp_valido(origem)
-        if not ok_arquivo:
-            mantidos_3gp += 1
-            yield (
-                f"  ⚠️ Não converteu {nome} ({detalhe}) — "
-                "mantido como .3gp para o zip"
-            )
-            continue
-
         yield f"Convertendo {i}/{len(arquivos_3gp)}: {nome}"
-        resultado = subprocess.run(
+
+        tentativas_ffmpeg = [
             [
-                "ffmpeg", "-y",
-                "-hide_banner", "-loglevel", "error",
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", origem,
                 "-af", filtro_audio,
-                "-ar", "44100",
-                "-c:a", "libmp3lame",
-                "-qscale:a", "0",
-                destino,
+                "-ar", "44100", "-c:a", "libmp3lame", "-qscale:a", "0",
+                destino_mp3,
             ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-err_detect", "ignore_err",
+                "-i", origem,
+                "-vn", "-ar", "44100", "-c:a", "libmp3lame", "-qscale:a", "4",
+                destino_mp3,
+            ],
+            [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-f", "amr", "-i", origem,
+                "-ar", "8000", "-c:a", "libmp3lame", "-qscale:a", "4",
+                destino_mp3,
+            ],
+        ]
 
-        if resultado.returncode != 0:
-            mantidos_3gp += 1
-            erro = _resumir_erro_ffmpeg(resultado.stderr.decode(errors="ignore"))
-            yield (
-                f"  ⚠️ Falha ao converter {nome}: {erro} — "
-                "mantido como .3gp para o zip"
-            )
-            if os.path.exists(destino):
+        convertido = False
+        ultimo_erro = ""
+        for cmd in tentativas_ffmpeg:
+            if os.path.exists(destino_mp3):
                 try:
-                    os.remove(destino)
+                    os.remove(destino_mp3)
                 except OSError:
                     pass
+            resultado = subprocess.run(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            if (
+                resultado.returncode == 0
+                and os.path.isfile(destino_mp3)
+                and os.path.getsize(destino_mp3) > 0
+            ):
+                convertido = True
+                break
+            ultimo_erro = _resumir_erro_ffmpeg(
+                resultado.stderr.decode(errors="ignore")
+            )
+
+        if convertido:
+            try:
+                os.remove(origem)
+            except OSError:
+                pass
+            convertidos += 1
+            yield from _empacotar_e_avisar(destino_mp3)
             continue
 
-        os.remove(origem)
-        convertidos += 1
+        mantidos_3gp += 1
+        if os.path.exists(destino_mp3):
+            try:
+                os.remove(destino_mp3)
+            except OSError:
+                pass
+        yield (
+            f"  ⚠️ Sem mp3 para {nome} ({ultimo_erro or 'erro desconhecido'}) — "
+            "empacotando .3gp"
+        )
+        yield from _empacotar_e_avisar(origem)
+
+    fechado_final = empacotador.finalizar()
+    if fechado_final:
+        nome, mb = fechado_final
+        pacotes += 1
+        yield (
+            f"📦 Pacote pronto: {nome} ({mb:.1f} MB) — "
+            "já disponível para download"
+        )
 
     yield (
-        f"Conversão concluída! {convertidos} mp3, "
-        f"{mantidos_3gp} mantido(s) em .3gp."
+        f"Conversão/empacotamento concluídos! "
+        f"{convertidos} mp3, {mantidos_3gp} em .3gp, {pacotes} pacote(s)."
     )
 
-def _zipar_audios():
+
+class _EmpacotadorProgressivo:
     """
-    Compacta os áudios de DADOS_DIR em várias partes .zip (audios_parteNN.zip),
-    cada uma com no máximo TAMANHO_MAXIMO_ZIP_BYTES, para que o download no
-    navegador não precise de um único arquivo pesado. Retorna a lista de
-    caminhos dos zips gerados, em ordem.
+    Empacota arquivos em zips de até TAMANHO_MAXIMO_ZIP_BYTES.
+    Escreve .zip.partial e só renomeia para .zip ao fechar a parte
+    (assim o download só lista pacotes completos).
     """
-    arquivos = []
-    for raiz, _, nomes in os.walk(DADOS_DIR):
-        for nome in nomes:
-            caminho = os.path.join(raiz, nome)
-            arquivos.append((caminho, os.path.getsize(caminho)))
-    arquivos.sort()
 
-    caminhos_zip = []
-    if not arquivos:
-        return caminhos_zip
+    def __init__(self):
+        self.contador = 1
+        self.zip_atual = None
+        self.caminho_parcial = None
+        self.tamanho_atual = 0
 
-    contador_partes = 1
-
-    def _abrir_nova_parte():
-        nonlocal contador_partes
-        caminho = os.path.join(
-            DOWNLOADS_ROOT, f"{PREFIXO_ZIP}{contador_partes:02d}.zip"
+    def _caminho_parcial(self, n):
+        return os.path.join(
+            DOWNLOADS_ROOT, f"{PREFIXO_ZIP}{n:02d}.zip.partial"
         )
-        contador_partes += 1
-        caminhos_zip.append(caminho)
-        return zipfile.ZipFile(caminho, "w", zipfile.ZIP_DEFLATED)
 
-    zip_atual = _abrir_nova_parte()
-    tamanho_atual = 0
-    try:
-        for caminho, tamanho in arquivos:
-            if tamanho_atual > 0 and tamanho_atual + tamanho > TAMANHO_MAXIMO_ZIP_BYTES:
-                zip_atual.close()
-                zip_atual = _abrir_nova_parte()
-                tamanho_atual = 0
-            arcname = os.path.relpath(caminho, DADOS_DIR)
-            zip_atual.write(caminho, arcname)
-            tamanho_atual += tamanho
-    finally:
-        zip_atual.close()
+    def _abrir(self):
+        os.makedirs(DOWNLOADS_ROOT, exist_ok=True)
+        self.caminho_parcial = self._caminho_parcial(self.contador)
+        self.zip_atual = zipfile.ZipFile(
+            self.caminho_parcial, "w", zipfile.ZIP_DEFLATED
+        )
+        self.tamanho_atual = 0
 
-    return caminhos_zip
+    def _fechar_parte(self):
+        if self.zip_atual is None:
+            return None
+        self.zip_atual.close()
+        self.zip_atual = None
+        final = self.caminho_parcial[: -len(".partial")]
+        os.replace(self.caminho_parcial, final)
+        mb = os.path.getsize(final) / (1024 * 1024)
+        nome = os.path.basename(final)
+        self.contador += 1
+        self.caminho_parcial = None
+        self.tamanho_atual = 0
+        return nome, mb
+
+    def adicionar(self, caminho_arquivo):
+        """
+        Inclui o arquivo no zip atual. Se estourar o limite, fecha a parte
+        e abre outra. Remove o arquivo de origem após incluir.
+        Retorna (nome, mb) se uma parte foi fechada neste passo, senão None.
+        """
+        if not os.path.isfile(caminho_arquivo):
+            return None
+
+        tamanho = os.path.getsize(caminho_arquivo)
+        pronto = None
+
+        if self.zip_atual is None:
+            self._abrir()
+
+        if (
+            self.tamanho_atual > 0
+            and self.tamanho_atual + tamanho > TAMANHO_MAXIMO_ZIP_BYTES
+        ):
+            pronto = self._fechar_parte()
+            self._abrir()
+
+        arcname = os.path.relpath(caminho_arquivo, DADOS_DIR)
+        self.zip_atual.write(caminho_arquivo, arcname)
+        self.tamanho_atual += tamanho
+        try:
+            os.remove(caminho_arquivo)
+        except OSError:
+            pass
+
+        # limpa pasta do dia se vazia
+        pasta = os.path.dirname(caminho_arquivo)
+        try:
+            if pasta.startswith(DADOS_DIR) and not os.listdir(pasta):
+                os.rmdir(pasta)
+        except OSError:
+            pass
+
+        return pronto
+
+    def finalizar(self):
+        if self.zip_atual is None:
+            return None
+        if self.tamanho_atual <= 0:
+            self.zip_atual.close()
+            self.zip_atual = None
+            if self.caminho_parcial and os.path.exists(self.caminho_parcial):
+                try:
+                    os.remove(self.caminho_parcial)
+                except OSError:
+                    pass
+            return None
+        return self._fechar_parte()
 
 
 def listar_zips_disponiveis():
     """
-    Lista os zips de áudio disponíveis em DOWNLOADS_ROOT (gerados na última
-    execução de baixar_audios), com nome e tamanho em bytes, ordenados.
+    Lista os zips de áudio completos em DOWNLOADS_ROOT (ignora .partial).
     """
     if not os.path.isdir(DOWNLOADS_ROOT):
         return []
 
     resultado = []
     for nome in sorted(os.listdir(DOWNLOADS_ROOT)):
-        if nome.startswith(PREFIXO_ZIP) and nome.endswith(".zip"):
-            caminho = os.path.join(DOWNLOADS_ROOT, nome)
-            if os.path.isfile(caminho):
-                resultado.append({"nome": nome, "tamanho_bytes": os.path.getsize(caminho)})
+        if not (nome.startswith(PREFIXO_ZIP) and nome.endswith(".zip")):
+            continue
+        if nome.endswith(".partial"):
+            continue
+        caminho = os.path.join(DOWNLOADS_ROOT, nome)
+        if os.path.isfile(caminho):
+            resultado.append(
+                {"nome": nome, "tamanho_bytes": os.path.getsize(caminho)}
+            )
     return resultado
 
 
@@ -574,6 +686,8 @@ def caminho_zip_seguro(nome_arquivo):
     """
     nome = os.path.basename(nome_arquivo or "")
     if not (nome.startswith(PREFIXO_ZIP) and nome.endswith(".zip")):
+        return None
+    if nome.endswith(".partial"):
         return None
 
     caminho = os.path.join(DOWNLOADS_ROOT, nome)
@@ -603,8 +717,8 @@ def _esvaziar_pasta_downloads():
 def baixar_audios():
     """
     Gerador que faz login no BE, coleta e baixa todas as gravações
-    disponíveis, converte para mp3 e compacta tudo em audios.zip, emitindo
-    mensagens de progresso a cada etapa (para acompanhamento via SSE).
+    disponíveis, converte para mp3 e empacota progressivamente em zips
+    de ~100 MB, emitindo mensagens de progresso (SSE / job em background).
     """
     navegador = None
     try:
@@ -653,16 +767,23 @@ def baixar_audios():
 
         yield from _baixar_com_sessao(navegador, dados)
 
-        yield from _converter_3gp_para_mp3()
+        try:
+            navegador.quit()
+        except Exception:
+            pass
+        navegador = None
+        yield "Navegador fechado — convertendo e empacotando..."
 
-        caminhos_zip = _zipar_audios()
-        if caminhos_zip:
-            yield f"Áudios compactados em {len(caminhos_zip)} arquivo(s) zip (máx. 50 MB cada):"
-            for caminho in caminhos_zip:
-                tamanho_mb = os.path.getsize(caminho) / (1024 * 1024)
-                yield f"  - {os.path.basename(caminho)} ({tamanho_mb:.1f} MB)"
+        yield from _converter_e_empacotar_progressivo()
+
+        zips = listar_zips_disponiveis()
+        if zips:
+            yield f"Pacotes disponíveis: {len(zips)}"
+            for item in zips:
+                mb = item["tamanho_bytes"] / (1024 * 1024)
+                yield f"  - {item['nome']} ({mb:.1f} MB)"
         else:
-            yield "Nenhum áudio encontrado para compactar."
+            yield "Nenhum pacote zip gerado."
 
         yield "Download de áudios concluído com sucesso!"
 
@@ -674,3 +795,66 @@ def baixar_audios():
                 navegador.quit()
             except Exception:
                 pass
+
+
+def status_job_audios():
+    with _job_lock:
+        return {
+            "status": _job_status,
+            "log": list(_job_log),
+        }
+
+
+def iniciar_job_audios():
+    """
+    Inicia o download em thread separada (não morre se o SSE cair).
+    Retorna (iniciou_agora: bool, mensagem: str).
+    """
+    global _job_status, _job_thread, _job_log
+
+    with _job_lock:
+        if _job_status == "running":
+            return False, "Já existe um download em andamento — reconectando ao log."
+        _job_status = "running"
+        _job_log = []
+
+    def _run():
+        global _job_status
+        try:
+            for msg in baixar_audios():
+                with _job_lock:
+                    _job_log.append(msg)
+            with _job_lock:
+                _job_status = "done"
+        except Exception as e:
+            with _job_lock:
+                _job_log.append(f"❌ ERRO: {e}")
+                _job_status = "error"
+
+    _job_thread = threading.Thread(target=_run, daemon=True, name="baixar-audios")
+    _job_thread.start()
+    return True, "Job iniciado em background."
+
+
+def iterar_log_job(desde=0, poll_s=0.4):
+    """
+    Gera mensagens do job a partir do índice `desde`, até o job terminar.
+    Usado pelo SSE; se o cliente cair, o job continua na thread.
+    """
+    idx = desde
+    while True:
+        with _job_lock:
+            status = _job_status
+            novos = _job_log[idx:]
+            idx = len(_job_log)
+
+        for msg in novos:
+            yield msg
+
+        if status in ("done", "error") and not novos:
+            with _job_lock:
+                if len(_job_log) == idx and _job_status in ("done", "error"):
+                    return
+            continue
+
+        sleep(poll_s)

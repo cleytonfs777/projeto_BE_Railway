@@ -48,6 +48,7 @@ Thumbs.db
 # Logs e temporários
 *.log
 logs.txt
+logs_erros.txt
 tmp/
 temp/
 .cache/

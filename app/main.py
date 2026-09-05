@@ -12,9 +12,11 @@ from app import db
 from app.auth import exigir_login_api, exigir_login_pagina, usuario_logado
 from app.services.gravacao import registrar_gravacao
 from app.services.baixar_audios import (
-    baixar_audios,
     caminho_zip_seguro,
+    iniciar_job_audios,
+    iterar_log_job,
     listar_zips_disponiveis,
+    status_job_audios,
 )
 
 load_dotenv()
@@ -120,10 +122,22 @@ async def gerar(
 
 @app.get("/api/baixar-audios")
 async def api_baixar_audios(_usuario: str = Depends(exigir_login_api)):
+    iniciou, info = iniciar_job_audios()
+
     def event_stream():
-        for message in baixar_audios():
-            payload = json.dumps({"message": message}, ensure_ascii=False)
+        # Avisa se reconectou a um job já rodando
+        yield f"data: {json.dumps({'message': info}, ensure_ascii=False)}\n\n"
+        for message in iterar_log_job(desde=0):
+            payload = json.dumps(
+                {
+                    "message": message,
+                    "zip_pronto": message.startswith("📦 Pacote pronto:"),
+                },
+                ensure_ascii=False,
+            )
             yield f"data: {payload}\n\n"
+        status = status_job_audios()["status"]
+        yield f"data: {json.dumps({'message': f'[status:{status}]'}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -135,6 +149,21 @@ async def api_baixar_audios(_usuario: str = Depends(exigir_login_api)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/baixar-audios/status")
+async def api_baixar_audios_status(_usuario: str = Depends(exigir_login_api)):
+    st = status_job_audios()
+    return {
+        "status": st["status"],
+        "arquivos": [
+            {
+                "nome": item["nome"],
+                "tamanho_mb": round(item["tamanho_bytes"] / (1024 * 1024), 1),
+            }
+            for item in listar_zips_disponiveis()
+        ],
+    }
 
 
 @app.get("/api/baixar-audios/arquivos")

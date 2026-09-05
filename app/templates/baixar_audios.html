@@ -244,10 +244,10 @@
         </div>
 
         <h1>Baixar Áudios</h1>
-        <p class="subtitle">Coleta todas as gravações disponíveis, converte para mp3 e disponibiliza um zip para download.</p>
+        <p class="subtitle">Coleta as gravações, converte para mp3 e libera pacotes zip de até 100 MB assim que ficam prontos — você pode baixar enquanto o restante processa.</p>
 
         <div class="card">
-            <p>Isso acessa o sistema BE, percorre todas as páginas de gravações, baixa os áudios, converte de 3gp para mp3 e organiza tudo em arquivos zip de até 50 MB cada, para facilitar o download. Pode levar alguns minutos.</p>
+            <p>O processo roda em segundo plano no servidor. Pacotes de até 100 MB aparecem abaixo conforme a conversão avança. Se a rede cair, o que já foi empacotado continua disponível e o job segue no servidor.</p>
             <button type="button" id="btn-iniciar">Iniciar Download</button>
             <div id="zip-links"></div>
         </div>
@@ -266,10 +266,26 @@
         const zipLinksEl = document.getElementById("zip-links");
         const logEl = document.getElementById("log");
         const statusEl = document.getElementById("status");
+        let pollZipsTimer = null;
+        let nomesZipVistos = new Set();
 
         function setStatus(text, cls) {
             statusEl.textContent = text;
             statusEl.className = "status" + (cls ? " " + cls : "");
+        }
+
+        function pararPollZips() {
+            if (pollZipsTimer) {
+                clearInterval(pollZipsTimer);
+                pollZipsTimer = null;
+            }
+        }
+
+        function iniciarPollZips() {
+            pararPollZips();
+            pollZipsTimer = setInterval(() => {
+                carregarLinksZip();
+            }, 4000);
         }
 
         async function carregarLinksZip() {
@@ -278,23 +294,35 @@
                 if (!response.ok) return;
 
                 const arquivos = await response.json();
-                zipLinksEl.innerHTML = "";
-
                 if (!arquivos.length) {
-                    zipLinksEl.style.display = "none";
+                    if (!nomesZipVistos.size) {
+                        zipLinksEl.style.display = "none";
+                    }
                     return;
                 }
 
+                let mudou = false;
+                arquivos.forEach((arquivo) => {
+                    if (!nomesZipVistos.has(arquivo.nome)) {
+                        nomesZipVistos.add(arquivo.nome);
+                        mudou = true;
+                    }
+                });
+
+                if (!mudou && zipLinksEl.children.length === arquivos.length) {
+                    return;
+                }
+
+                zipLinksEl.innerHTML = "";
                 arquivos.forEach((arquivo, indice) => {
                     const link = document.createElement("a");
                     link.href = `/api/baixar-audios/arquivo/${encodeURIComponent(arquivo.nome)}`;
                     link.innerHTML = `<span>Parte ${indice + 1} — ${arquivo.nome}</span><span class="tamanho">${arquivo.tamanho_mb} MB</span>`;
                     zipLinksEl.appendChild(link);
                 });
-
                 zipLinksEl.style.display = "flex";
             } catch {
-                // silencioso: apenas não exibe os links
+                // silencioso
             }
         }
 
@@ -310,10 +338,12 @@
 
         btnIniciar.addEventListener("click", async () => {
             logEl.innerHTML = "";
-            zipLinksEl.style.display = "none";
             zipLinksEl.innerHTML = "";
+            zipLinksEl.style.display = "none";
+            nomesZipVistos = new Set();
             btnIniciar.disabled = true;
             setStatus("Executando...", "running");
+            iniciarPollZips();
 
             let houveErro = false;
 
@@ -344,26 +374,38 @@
 
                         try {
                             const parsed = JSON.parse(data);
-                            const isError = parsed.message.startsWith("❌");
-                            appendLog(parsed.message, isError);
+                            const msg = parsed.message || "";
+                            if (msg.startsWith("[status:")) continue;
+                            const isError = msg.startsWith("❌");
+                            appendLog(msg, isError);
                             if (isError) houveErro = true;
+                            if (parsed.zip_pronto || msg.includes("Pacote pronto")) {
+                                await carregarLinksZip();
+                            }
                         } catch {
                             appendLog(data);
                         }
                     }
                 }
 
+                await carregarLinksZip();
                 if (houveErro) {
                     setStatus("Erro", "error");
                 } else {
                     setStatus("Concluído", "done");
-                    await carregarLinksZip();
                 }
             } catch (err) {
-                appendLog(`❌ ERRO: ${err.message}`, true);
-                setStatus("Erro", "error");
+                appendLog(`❌ ERRO de rede/SSE: ${err.message}`, true);
+                appendLog(
+                    "O job pode continuar no servidor. Pacotes já prontos seguem listados abaixo — atualize a página se precisar.",
+                    false
+                );
+                setStatus("Rede interrompida", "error");
+                await carregarLinksZip();
             } finally {
+                pararPollZips();
                 btnIniciar.disabled = false;
+                await carregarLinksZip();
             }
         });
 
