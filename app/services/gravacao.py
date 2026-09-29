@@ -13,6 +13,7 @@ load_dotenv()
 
 FORMATO_DATA_HORA = "%d/%m/%Y %H:%M"
 
+SE_COMPRA = os.getenv("SE_COMPRA")
 
 def tranformation(data_hora_inicial, data_hora_final, duracao_segundos):
     """
@@ -108,9 +109,10 @@ def registrar_gravacao(data_hora_inicial, data_hora_final, duracao_segundos):
         yield "Login realizado com sucesso!"
         sleep(5)
 
+        STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
+
         navegador.find_element(
-            By.CSS_SELECTOR, "#slide-out > li:nth-child(2) > a"
-        ).click()
+            By.CSS_SELECTOR, STR_COMPRA).click()
         yield "Clicou no link de gravacao"
 
         sleep(2)
