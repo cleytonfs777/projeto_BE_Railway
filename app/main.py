@@ -18,6 +18,13 @@ from app.services.baixar_audios import (
     listar_zips_disponiveis,
     status_job_audios,
 )
+from app.services.baixar_videos import (
+    caminho_zip_seguro as caminho_zip_seguro_videos,
+    iniciar_job_videos,
+    iterar_log_job as iterar_log_job_videos,
+    listar_zips_disponiveis as listar_zips_disponiveis_videos,
+    status_job_videos,
+)
 
 load_dotenv()
 
@@ -90,6 +97,18 @@ async def baixar_audios_pagina(request: Request):
 
     return templates.TemplateResponse(
         "baixar_audios.html",
+        {"request": request, "usuario": usuario_logado(request)},
+    )
+
+
+@app.get("/baixar-tela", response_class=HTMLResponse)
+async def baixar_tela_pagina(request: Request):
+    redirecionamento = exigir_login_pagina(request)
+    if redirecionamento:
+        return redirecionamento
+
+    return templates.TemplateResponse(
+        "baixar_tela.html",
         {"request": request, "usuario": usuario_logado(request)},
     )
 
@@ -182,6 +201,78 @@ async def api_baixar_audios_arquivo(
     nome_arquivo: str, _usuario: str = Depends(exigir_login_api)
 ):
     caminho = caminho_zip_seguro(nome_arquivo)
+    if not caminho:
+        return HTMLResponse(
+            "Arquivo não encontrado. Execute o download primeiro.",
+            status_code=404,
+        )
+    return FileResponse(
+        caminho, media_type="application/zip", filename=os.path.basename(caminho)
+    )
+
+
+@app.get("/api/baixar-tela")
+async def api_baixar_tela(_usuario: str = Depends(exigir_login_api)):
+    iniciou, info = iniciar_job_videos()
+
+    def event_stream():
+        # Avisa se reconectou a um job já rodando
+        yield f"data: {json.dumps({'message': info}, ensure_ascii=False)}\n\n"
+        for message in iterar_log_job_videos(desde=0):
+            payload = json.dumps(
+                {
+                    "message": message,
+                    "zip_pronto": message.startswith("📦 Pacote pronto:"),
+                },
+                ensure_ascii=False,
+            )
+            yield f"data: {payload}\n\n"
+        status = status_job_videos()["status"]
+        yield f"data: {json.dumps({'message': f'[status:{status}]'}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/baixar-tela/status")
+async def api_baixar_tela_status(_usuario: str = Depends(exigir_login_api)):
+    st = status_job_videos()
+    return {
+        "status": st["status"],
+        "arquivos": [
+            {
+                "nome": item["nome"],
+                "tamanho_mb": round(item["tamanho_bytes"] / (1024 * 1024), 1),
+            }
+            for item in listar_zips_disponiveis_videos()
+        ],
+    }
+
+
+@app.get("/api/baixar-tela/arquivos")
+async def api_baixar_tela_arquivos(_usuario: str = Depends(exigir_login_api)):
+    return [
+        {
+            "nome": item["nome"],
+            "tamanho_mb": round(item["tamanho_bytes"] / (1024 * 1024), 1),
+        }
+        for item in listar_zips_disponiveis_videos()
+    ]
+
+
+@app.get("/api/baixar-tela/arquivo/{nome_arquivo}")
+async def api_baixar_tela_arquivo(
+    nome_arquivo: str, _usuario: str = Depends(exigir_login_api)
+):
+    caminho = caminho_zip_seguro_videos(nome_arquivo)
     if not caminho:
         return HTMLResponse(
             "Arquivo não encontrado. Execute o download primeiro.",

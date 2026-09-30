@@ -699,19 +699,25 @@ def caminho_zip_seguro(nome_arquivo):
 
 def _esvaziar_pasta_downloads():
     """
-    Remove todo o conteúdo de DOWNLOADS_ROOT, mantendo a pasta em si.
+    Remove os dados de trabalho (DADOS_DIR) e os zips de áudio já gerados
+    (prefixo PREFIXO_ZIP) dentro de DOWNLOADS_ROOT. Não mexe em outros
+    arquivos/pastas que dividam essa mesma raiz (ex.: pasta de vídeos),
+    já que DOWNLOADS_ROOT é compartilhada entre as diferentes automações.
     """
+    if os.path.isdir(DADOS_DIR):
+        shutil.rmtree(DADOS_DIR, ignore_errors=True)
+
     if os.path.isdir(DOWNLOADS_ROOT):
         for nome in os.listdir(DOWNLOADS_ROOT):
-            caminho = os.path.join(DOWNLOADS_ROOT, nome)
-            if os.path.isdir(caminho):
-                shutil.rmtree(caminho, ignore_errors=True)
-            else:
+            if nome.startswith(PREFIXO_ZIP) and (
+                nome.endswith(".zip") or nome.endswith(".zip.partial")
+            ):
                 try:
-                    os.remove(caminho)
+                    os.remove(os.path.join(DOWNLOADS_ROOT, nome))
                 except OSError:
                     pass
-    os.makedirs(DOWNLOADS_ROOT, exist_ok=True)
+
+    os.makedirs(DADOS_DIR, exist_ok=True)
 
 
 def baixar_audios():

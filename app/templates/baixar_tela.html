@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registro de Gravação BE</title>
+    <title>Baixar Tela — BE</title>
     <style>
         :root {
             --bg: #0f172a;
@@ -14,6 +14,7 @@
             --accent: #3b82f6;
             --accent-hover: #2563eb;
             --success: #22c55e;
+            --success-hover: #16a34a;
             --error: #ef4444;
         }
 
@@ -104,42 +105,13 @@
             margin-bottom: 1.5rem;
         }
 
-        .form-grid {
-            display: grid;
-            gap: 1rem;
-        }
-
-        label {
-            display: block;
-            font-size: 0.875rem;
-            font-weight: 500;
-            margin-bottom: 0.375rem;
-        }
-
-        .hint {
-            font-size: 0.75rem;
+        .card p {
             color: var(--muted);
-            margin-top: 0.25rem;
-        }
-
-        input[type="text"],
-        input[type="number"] {
-            width: 100%;
-            padding: 0.625rem 0.75rem;
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            color: var(--text);
-            font-size: 0.9375rem;
-        }
-
-        input:focus {
-            outline: none;
-            border-color: var(--accent);
+            font-size: 0.875rem;
+            margin-bottom: 1rem;
         }
 
         button {
-            margin-top: 0.5rem;
             width: 100%;
             padding: 0.75rem;
             background: var(--accent);
@@ -159,6 +131,37 @@
         button:disabled {
             opacity: 0.6;
             cursor: not-allowed;
+        }
+
+        #zip-links {
+            display: none;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        #zip-links a {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: var(--success);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-size: 0.9375rem;
+            font-weight: 600;
+            transition: background 0.15s;
+        }
+
+        #zip-links a:hover {
+            background: var(--success-hover);
+        }
+
+        #zip-links a .tamanho {
+            font-weight: 400;
+            font-size: 0.8125rem;
+            opacity: 0.85;
         }
 
         .log-header {
@@ -231,9 +234,9 @@
     <div class="container">
         <div class="nav">
             <div class="nav-links">
-                <a href="/" class="active">Gerar Gravação</a>
+                <a href="/">Gerar Gravação</a>
                 <a href="/baixar-audios">Baixar Áudios</a>
-                <a href="/baixar-tela">Baixar Tela</a>
+                <a href="/baixar-tela" class="active">Baixar Tela</a>
             </div>
             <div class="nav-user">
                 <span>{{ usuario }}</span>
@@ -241,49 +244,13 @@
             </div>
         </div>
 
-        <h1>Registro de Gravação BE</h1>
-        <p class="subtitle">Configure o período e inicie a automação com acompanhamento em tempo real.</p>
+        <h1>Baixar Tela</h1>
+        <p class="subtitle">Coleta os vídeos capturados de tela e libera pacotes zip de até 100 MB assim que ficam prontos — você pode baixar enquanto o restante processa.</p>
 
         <div class="card">
-            <form id="form-gerar" class="form-grid">
-                <div>
-                    <label for="data_hora_inicial">Data/Hora Inicial</label>
-                    <input
-                        type="text"
-                        id="data_hora_inicial"
-                        name="data_hora_inicial"
-                        placeholder="09/07/2026 11:15"
-                        required
-                    >
-                    <p class="hint">Formato: {{ formato_data_hora }}</p>
-                </div>
-
-                <div>
-                    <label for="data_hora_final">Data/Hora Final</label>
-                    <input
-                        type="text"
-                        id="data_hora_final"
-                        name="data_hora_final"
-                        placeholder="09/07/2026 12:00"
-                        required
-                    >
-                    <p class="hint">Formato: {{ formato_data_hora }}</p>
-                </div>
-
-                <div>
-                    <label for="duracao_segundos">Duração (segundos)</label>
-                    <input
-                        type="number"
-                        id="duracao_segundos"
-                        name="duracao_segundos"
-                        value="600"
-                        min="1"
-                        required
-                    >
-                </div>
-
-                <button type="submit" id="btn-gerar">Gerar</button>
-            </form>
+            <p>O processo roda em segundo plano no servidor. Pacotes de até 100 MB aparecem abaixo conforme os vídeos vão sendo baixados. Se a rede cair, o que já foi empacotado continua disponível e o job segue no servidor.</p>
+            <button type="button" id="btn-iniciar">Iniciar Download</button>
+            <div id="zip-links"></div>
         </div>
 
         <div class="card">
@@ -296,35 +263,68 @@
     </div>
 
     <script>
-        const form = document.getElementById("form-gerar");
-        const btnGerar = document.getElementById("btn-gerar");
+        const btnIniciar = document.getElementById("btn-iniciar");
+        const zipLinksEl = document.getElementById("zip-links");
         const logEl = document.getElementById("log");
         const statusEl = document.getElementById("status");
-
-        function formatarDataHora(date) {
-            const pad = (n) => String(n).padStart(2, "0");
-            const dia = pad(date.getDate());
-            const mes = pad(date.getMonth() + 1);
-            const ano = date.getFullYear();
-            const horas = pad(date.getHours());
-            const minutos = pad(date.getMinutes());
-            return `${dia}/${mes}/${ano} ${horas}:${minutos}`;
-        }
-
-        function preencherDatasPadrao() {
-            const agora = new Date();
-            const inicial = new Date(agora.getTime() + 3 * 60 * 1000);
-            const final = new Date(inicial.getTime() + (60 + 30) * 60 * 1000);
-
-            document.getElementById("data_hora_inicial").value = formatarDataHora(inicial);
-            document.getElementById("data_hora_final").value = formatarDataHora(final);
-        }
-
-        preencherDatasPadrao();
+        let pollZipsTimer = null;
+        let nomesZipVistos = new Set();
 
         function setStatus(text, cls) {
             statusEl.textContent = text;
             statusEl.className = "status" + (cls ? " " + cls : "");
+        }
+
+        function pararPollZips() {
+            if (pollZipsTimer) {
+                clearInterval(pollZipsTimer);
+                pollZipsTimer = null;
+            }
+        }
+
+        function iniciarPollZips() {
+            pararPollZips();
+            pollZipsTimer = setInterval(() => {
+                carregarLinksZip();
+            }, 4000);
+        }
+
+        async function carregarLinksZip() {
+            try {
+                const response = await fetch("/api/baixar-tela/arquivos");
+                if (!response.ok) return;
+
+                const arquivos = await response.json();
+                if (!arquivos.length) {
+                    if (!nomesZipVistos.size) {
+                        zipLinksEl.style.display = "none";
+                    }
+                    return;
+                }
+
+                let mudou = false;
+                arquivos.forEach((arquivo) => {
+                    if (!nomesZipVistos.has(arquivo.nome)) {
+                        nomesZipVistos.add(arquivo.nome);
+                        mudou = true;
+                    }
+                });
+
+                if (!mudou && zipLinksEl.children.length === arquivos.length) {
+                    return;
+                }
+
+                zipLinksEl.innerHTML = "";
+                arquivos.forEach((arquivo, indice) => {
+                    const link = document.createElement("a");
+                    link.href = `/api/baixar-tela/arquivo/${encodeURIComponent(arquivo.nome)}`;
+                    link.innerHTML = `<span>Parte ${indice + 1} — ${arquivo.nome}</span><span class="tamanho">${arquivo.tamanho_mb} MB</span>`;
+                    zipLinksEl.appendChild(link);
+                });
+                zipLinksEl.style.display = "flex";
+            } catch {
+                // silencioso
+            }
         }
 
         function appendLog(message, isError = false) {
@@ -337,25 +337,19 @@
             logEl.scrollTop = logEl.scrollHeight;
         }
 
-        form.addEventListener("submit", async (e) => {
-            e.preventDefault();
-
-            const data_hora_inicial = document.getElementById("data_hora_inicial").value.trim();
-            const data_hora_final = document.getElementById("data_hora_final").value.trim();
-            const duracao_segundos = document.getElementById("duracao_segundos").value;
-
+        btnIniciar.addEventListener("click", async () => {
             logEl.innerHTML = "";
-            btnGerar.disabled = true;
+            zipLinksEl.innerHTML = "";
+            zipLinksEl.style.display = "none";
+            nomesZipVistos = new Set();
+            btnIniciar.disabled = true;
             setStatus("Executando...", "running");
+            iniciarPollZips();
 
-            const params = new URLSearchParams({
-                data_hora_inicial,
-                data_hora_final,
-                duracao_segundos,
-            });
+            let houveErro = false;
 
             try {
-                const response = await fetch(`/api/gerar?${params}`);
+                const response = await fetch("/api/baixar-tela");
                 if (!response.ok) {
                     throw new Error(`Erro HTTP ${response.status}`);
                 }
@@ -377,32 +371,46 @@
                         if (!line.startsWith("data: ")) continue;
 
                         const data = line.slice(6);
-                        if (data === "[DONE]") {
-                            setStatus("Concluído", "done");
-                            continue;
-                        }
+                        if (data === "[DONE]") continue;
 
                         try {
                             const parsed = JSON.parse(data);
-                            const isError = parsed.message.startsWith("❌");
-                            appendLog(parsed.message, isError);
-                            if (isError) setStatus("Erro", "error");
+                            const msg = parsed.message || "";
+                            if (msg.startsWith("[status:")) continue;
+                            const isError = msg.startsWith("❌");
+                            appendLog(msg, isError);
+                            if (isError) houveErro = true;
+                            if (parsed.zip_pronto || msg.includes("Pacote pronto")) {
+                                await carregarLinksZip();
+                            }
                         } catch {
                             appendLog(data);
                         }
                     }
                 }
 
-                if (statusEl.textContent === "Executando...") {
+                await carregarLinksZip();
+                if (houveErro) {
+                    setStatus("Erro", "error");
+                } else {
                     setStatus("Concluído", "done");
                 }
             } catch (err) {
-                appendLog(`❌ ERRO: ${err.message}`, true);
-                setStatus("Erro", "error");
+                appendLog(`❌ ERRO de rede/SSE: ${err.message}`, true);
+                appendLog(
+                    "O job pode continuar no servidor. Pacotes já prontos seguem listados abaixo — atualize a página se precisar.",
+                    false
+                );
+                setStatus("Rede interrompida", "error");
+                await carregarLinksZip();
             } finally {
-                btnGerar.disabled = false;
+                pararPollZips();
+                btnIniciar.disabled = false;
+                await carregarLinksZip();
             }
         });
+
+        carregarLinksZip();
     </script>
 </body>
 </html>
