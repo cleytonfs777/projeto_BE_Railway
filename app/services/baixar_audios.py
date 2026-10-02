@@ -25,6 +25,8 @@ DADOS_DIR = os.path.join(DOWNLOADS_ROOT, "dados")
 PREFIXO_ZIP = "audios_parte"
 TAMANHO_MAXIMO_ZIP_BYTES = 100 * 1024 * 1024
 
+SE_COMPRA = os.getenv("SE_COMPRA")
+
 # Job em background: sobrevive a queda de rede do navegador
 _job_lock = threading.Lock()
 _job_status = "idle"  # idle | running | done | error
@@ -755,9 +757,9 @@ def baixar_audios():
         yield "Login realizado com sucesso!"
         sleep(5)
 
-        navegador.find_element(
-            By.CSS_SELECTOR, "#slide-out > li:nth-child(2) > a"
-        ).click()
+        STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
+
+        navegador.find_element(By.CSS_SELECTOR, STR_COMPRA).click()
         yield "Clicou no link de gravação"
         sleep(2)
 
