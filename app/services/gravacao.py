@@ -109,13 +109,13 @@ def registrar_gravacao(data_hora_inicial, data_hora_final, duracao_segundos):
         yield "Login realizado com sucesso!"
         sleep(5)
 
-        STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
+        # STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
 
-        navegador.find_element(
-            By.CSS_SELECTOR, STR_COMPRA).click()
-        yield "Clicou no link de gravacao"
+        # navegador.find_element(
+        #     By.CSS_SELECTOR, STR_COMPRA).click()
+        # yield "Clicou no link de gravacao"
 
-        sleep(2)
+        # sleep(2)
 
         navegador.find_element(
             By.CSS_SELECTOR, "#load_div > div:nth-child(11) > a"

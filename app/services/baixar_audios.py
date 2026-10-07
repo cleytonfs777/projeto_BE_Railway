@@ -36,7 +36,7 @@ _job_thread = None
 
 def _criar_navegador():
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
+    # options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -757,16 +757,17 @@ def baixar_audios():
         yield "Login realizado com sucesso!"
         sleep(5)
 
-        STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
+        # STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
 
-        navegador.find_element(By.CSS_SELECTOR, STR_COMPRA).click()
-        yield "Clicou no link de gravação"
-        sleep(2)
+       # navegador.find_element(By.CSS_SELECTOR, STR_COMPRA).click()
+        # yield "Clicou no link de gravação"
+        # sleep(2)
 
         navegador.find_element(
             By.CSS_SELECTOR, "#load_div > div:nth-child(11) > a"
         ).click()
         yield "Acessou a página de gravação"
+
 
         _definir_registros_por_pagina(navegador, "50")
         yield "Registros por página ajustados para 50"
