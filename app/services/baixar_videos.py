@@ -18,6 +18,8 @@ import requests
 
 load_dotenv()
 
+SE_COMPRA = os.getenv("SE_COMPRA")
+
 FORMATO_DATA_HORA_REGISTRO = "%d/%m/%Y %H:%M:%S"
 
 # Tudo fica dentro da mesma pasta "downloads" usada pelo job de áudios
@@ -719,9 +721,10 @@ def baixar_videos():
         yield "Login realizado com sucesso!"
         sleep(5)
 
-        navegador.find_element(
-            By.CSS_SELECTOR, "#slide-out > li:nth-child(3) > a"
-        ).click()
+
+        STR_COMPRA = f"#slide-out > li:nth-child({SE_COMPRA}) > a"
+
+        navegador.find_element(By.CSS_SELECTOR, STR_COMPRA).click()
         yield "Clicou no painel antigo"
         sleep(2)
 
